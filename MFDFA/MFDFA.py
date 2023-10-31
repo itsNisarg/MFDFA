@@ -19,7 +19,7 @@ __all__ = [
 
 def MFDFA(timeseries: np.ndarray, lag: np.ndarray, order: int = 1,
           q: np.ndarray = 2, stat: bool = False, modified: bool = False,
-          extensions: dict = {'EMD': False, 'eDFA': False, 'window': False}
+          extensions: dict = {'EMD': False, 'eDFA': False, 'window': False, 'fq0': False}
           ) -> Tuple[np.array, np.ndarray]:
     """
     Multifractal Detrended Fluctuation Analysis of timeseries. MFDFA generates
@@ -147,7 +147,7 @@ def MFDFA(timeseries: np.ndarray, lag: np.ndarray, order: int = 1,
     q = np.asarray_chkfinite(q, dtype=float)
 
     # Ensure q≈0 is removed, since it does not converge. Limit set at |q| < 0.1
-    q = q[(q < -.1) + (q > .1)]
+    q = q[(q < -.09) + (q > .09)]
 
     # Reshape q to perform np.float_power
     q = q.reshape(-1, 1)
@@ -164,6 +164,9 @@ def MFDFA(timeseries: np.ndarray, lag: np.ndarray, order: int = 1,
 
     # Return f of (fractal)-variances
     f = np.empty((0, q.size))
+    if 'fq0' in extensions:
+        if extensions['fq0'] is not False:
+            f = np.empty((0, q.size + 1))
 
     if stat is True:
         f_std = np.empty((0, q.size))
@@ -196,24 +199,26 @@ def MFDFA(timeseries: np.ndarray, lag: np.ndarray, order: int = 1,
         if window is False:
             # Reshape into (N/lag, lag)
             Y_ = Y[:N - N % i].reshape((N - N % i) // i, i)
-            Y_r = Y[N % i:].reshape((N - N % i) // i, i)
+            # Y_r = Y[N % i:].reshape((N - N % i) // i, i)      # For compatibility with MATLAB
 
             # If order = 0 one gets simply Fluctuation Analysis (FA), or if
             # one is using the EMD setting the data is detrended and no
             # polynomial fitting is needed.
             if order == 0:
                 # Skip detrending
-                F = np.append(np.var(Y_, axis=1), np.var(Y_r, axis=1))
+                # F = np.append(np.var(Y_, axis=1), np.var(Y_r, axis=1))
+                F = np.var(Y_, axis=1)
 
             else:
                 # Perform a polynomial fit to each segments
                 p = polyfit(X[:i], Y_.T, order)
-                p_r = polyfit(X[:i], Y_r.T, order)
+                # p_r = polyfit(X[:i], Y_r.T, order)
 
                 # Subtract the trend from the fit and calculate the variance
-                F = np.append(np.var(Y_ - polyval(X[:i], p), axis=1),
-                              np.var(Y_r - polyval(X[:i], p_r), axis=1)
-                              )
+                # F = np.append(np.var(Y_ - polyval(X[:i], p), axis=1),
+                #               np.var(Y_r - polyval(X[:i], p_r), axis=1)
+                #               )
+                F = np.var(Y_ - polyval(X[:i], p), axis=1)
 
         # For short timeseries, using a moving window instead of segmenting
         # the timeseries. Notice the number of operations is considerably
@@ -244,13 +249,22 @@ def MFDFA(timeseries: np.ndarray, lag: np.ndarray, order: int = 1,
                     F = np.append(F, np.var(Y_ - polyval(X[:i], p), axis=1))
 
         # Caculate the Multifractal (Non)-Detrended Fluctuation Analysis
-        f = np.append(f,
-                      np.float_power(
+        mfndfa = np.float_power(
                           np.mean(np.float_power(F, q / 2), axis=1),
                           1 / q.T
-                      ),
-                      axis=0
                       )
+        if ('fq0', True) in extensions.items():
+            f0 = np.exp(0.5 * np.mean(np.log(F)))
+            mfndfa0 = np.insert(mfndfa.reshape(-1), q.size//2, f0).reshape(1, -1)
+            f = np.append(f,
+                        mfndfa0,
+                        axis=0
+                        )
+        else:
+            f = np.append(f,
+                        mfndfa,
+                        axis=0
+                        )
 
         # Calculate standard deviation associated with each mean
         if stat is True:
